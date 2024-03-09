@@ -130,15 +130,14 @@ impl Bitmap {
         let mut count = 0;
 
         for i in (0..=idx).step_by(64) {
-            let ones_count;
             let full_block = i + 63 < idx;
 
-            if full_block {
-                ones_count = self.data[i / 64].count_ones() as usize;
+            let ones_count = if full_block {
+                self.data[i / 64].count_ones() as usize
             } else {
                 let mask = leading_ones_mask((idx - i + 1) as u32);
-                ones_count = (self.data[i / 64] & mask).count_ones() as usize;
-            }
+                (self.data[i / 64] & mask).count_ones() as usize
+            };
 
             if check_ones {
                 count += ones_count;

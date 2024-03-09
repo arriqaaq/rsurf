@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use crate::bitmap::Bitmap;
 use crate::dense::Builder;
-use crate::iterator::{Iterator, SurfError};
+use crate::iterator::{Error, Iterator};
 use crate::key::{truncate, Key};
 use crate::options::Options;
 
@@ -13,7 +13,7 @@ pub struct Surf {
 }
 
 impl Surf {
-    pub fn new(raw_keys: Vec<Vec<u8>>, options: Options) -> Result<Surf, SurfError> {
+    pub fn new(raw_keys: Vec<Vec<u8>>, options: Options) -> Result<Surf, Error> {
         // Convert raw_keys to keys
         let mut keys: Vec<Key> = raw_keys;
         keys.sort();
@@ -35,10 +35,7 @@ impl Surf {
         })
     }
 
-    pub fn lookup(
-        &mut self,
-        key: Vec<u8>,
-    ) -> Result<(bool, Vec<u8>, Iterator, Option<SurfError>), SurfError> {
+    pub fn get(&mut self, key: Vec<u8>) -> Result<(bool, Vec<u8>, Iterator), Error> {
         let mut it = Iterator {
             labels: self.dense_labels.clone(),
             has_child: self.dense_has_child.clone(),
@@ -56,15 +53,15 @@ impl Surf {
             match it.go_to_child(key_byte) {
                 Ok(_) => {}
                 Err(e) => {
-                    if e == SurfError::NoSuchEdge {
+                    if e == Error::NoSuchEdge {
                         // No edge with this value, so the key doesn't exist.
-                        return Ok((false, vec![], it, None));
-                    } else if e == SurfError::IsLeaf {
+                        return Ok((false, vec![], it));
+                    } else if e == Error::IsLeaf {
                         // We attempted to enter a leaf node, so the key exists
-                        return Ok((true, key[..=i].to_vec(), it, None));
+                        return Ok((true, key[..=i].to_vec(), it));
                     } else {
                         // Non-specific error, e.g. issue with bitmap access
-                        return Ok((false, vec![], it, Some(e)));
+                        return Err(e);
                     }
                 }
             }
@@ -76,42 +73,34 @@ impl Surf {
         match self.dense_is_prefix_key.get(it.node_index) {
             Ok(is_prefix_key) => {
                 if is_prefix_key == 1 {
-                    Ok((true, key, it, None))
+                    Ok((true, key, it))
                 } else {
-                    Ok((false, vec![], it, None))
+                    Ok((false, vec![], it))
                 }
             }
-            Err(e) => Ok((
-                false,
-                vec![],
-                it,
-                Some(SurfError::CustomError(format!(
-                    "Error accessing bit in D-IsPrefixKey: {}",
-                    e
-                ))),
-            )),
+            Err(e) => Err(Error::CustomError(format!(
+                "Error accessing bit in D-IsPrefixKey: {}",
+                e
+            ))),
         }
     }
 
-    pub fn lookup_or_greater(
-        &mut self,
-        key: Vec<u8>,
-    ) -> Result<(Vec<u8>, Iterator, Option<SurfError>), SurfError> {
-        let (exists, matched_key, mut it, _err) = self.lookup(key)?;
+    pub fn get_or_next(&mut self, key: Vec<u8>) -> Result<(Vec<u8>, Iterator), Error> {
+        let (exists, matched_key, mut it) = self.get(key)?;
 
         if exists {
             it.next_edge += 1;
-            Ok((matched_key, it, None))
+            Ok((matched_key, it))
         } else {
-            match it.next() {
-                Ok(larger_key) => Ok((larger_key, it, None)),
-                Err(e) => Ok((vec![], it, Some(e))),
+            match it.next_key() {
+                Ok(larger_key) => Ok((larger_key, it)),
+                Err(e) => Err(e),
             }
         }
     }
 
-    pub fn range_lookup(&mut self, low: Vec<u8>, high: Vec<u8>) -> Result<bool, SurfError> {
-        let (matched_key, _, _err) = self.lookup_or_greater(low)?;
+    pub fn range(&mut self, low: Vec<u8>, high: Vec<u8>) -> Result<bool, Error> {
+        let (matched_key, _) = self.get_or_next(low)?;
 
         if matched_key <= high {
             Ok(true)
@@ -120,8 +109,8 @@ impl Surf {
         }
     }
 
-    pub fn count(&mut self, low: Vec<u8>, high: Vec<u8>) -> Result<usize, SurfError> {
-        let (matched_key, mut it, _err) = self.lookup_or_greater(low)?;
+    pub fn count(&mut self, low: Vec<u8>, high: Vec<u8>) -> Result<usize, Error> {
+        let (matched_key, mut it) = self.get_or_next(low)?;
 
         let mut count = 0;
         let high_key = high;
@@ -129,7 +118,7 @@ impl Surf {
         while cur_key <= high_key {
             count += 1;
 
-            match it.next() {
+            match it.next_key() {
                 Ok(next_key) => cur_key = next_key,
                 Err(_) => break,
             }
@@ -144,7 +133,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_lookup() {
+    fn test_get() {
         let keys: Vec<Vec<u8>> = vec![
             vec![0x00, 0x01],       // Key in intermediary node
             vec![0x00, 0x01, 0x02], // Key in leaf node
@@ -158,7 +147,7 @@ mod tests {
         };
 
         for k in &keys {
-            match surf.lookup(k.clone()) {
+            match surf.get(k.clone()) {
                 Ok(exists) => {
                     assert_eq!(exists.0, true);
                 }
@@ -169,7 +158,7 @@ mod tests {
         let non_existent_keys: Vec<Vec<u8>> = vec![vec![0x00, 0x02], vec![0x43]];
 
         for k in non_existent_keys {
-            match surf.lookup(k) {
+            match surf.get(k) {
                 Ok(exists) => {
                     assert_eq!(exists.0, false);
                 }

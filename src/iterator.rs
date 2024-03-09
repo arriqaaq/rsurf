@@ -1,69 +1,33 @@
 use crate::bitmap::Bitmap;
 
-
 use std::collections::VecDeque;
-use std::error::Error;
-
 
 #[derive(Debug, PartialEq)]
-pub enum SurfError {
+pub enum Error {
     NoSuchEdge,
     IsLeaf,
     EndOfTrie,
     CustomError(String),
 }
 
-impl std::fmt::Display for SurfError {
+impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            SurfError::NoSuchEdge => write!(f, "No such edge"),
-            SurfError::IsLeaf => write!(f, "Is leaf"),
-            SurfError::EndOfTrie => write!(f, "Reached end of trie"),
-            SurfError::CustomError(s) => write!(f, "{}", s),
+            Error::NoSuchEdge => write!(f, "No such edge"),
+            Error::IsLeaf => write!(f, "Is leaf"),
+            Error::EndOfTrie => write!(f, "Reached end of trie"),
+            Error::CustomError(s) => write!(f, "{}", s),
         }
     }
 }
 
-impl Error for SurfError {}
+impl std::error::Error for Error {}
 
-impl From<&'static str> for SurfError {
-    fn from(err: &'static str) -> SurfError {
-        SurfError::CustomError(err.to_string())
+impl From<&'static str> for Error {
+    fn from(err: &'static str) -> Error {
+        Error::CustomError(err.to_string())
     }
 }
-
-// #[derive(Debug, Clone)]
-// pub struct ErrNoSuchEdge;
-
-// impl fmt::Display for ErrNoSuchEdge {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         write!(f, "Cannot move to non-existent edge")
-//     }
-// }
-
-// impl Error for ErrNoSuchEdge {}
-
-// #[derive(Debug, Clone)]
-// pub struct ErrIsLeaf;
-
-// impl fmt::Display for ErrIsLeaf {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         write!(f, "Cannot move to leaf node")
-//     }
-// }
-
-// impl Error for ErrIsLeaf {}
-
-// #[derive(Debug, Clone)]
-// pub struct ErrEndOfTrie;
-
-// impl fmt::Display for ErrEndOfTrie {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         write!(f, "Reached end of trie")
-//     }
-// }
-
-// impl Error for ErrEndOfTrie {}
 
 pub struct Iterator {
     pub labels: Bitmap,
@@ -77,19 +41,19 @@ pub struct Iterator {
 }
 
 impl Iterator {
-    pub fn go_to_child(&mut self, edge: u8) -> Result<(), SurfError> {
+    pub fn go_to_child(&mut self, edge: u8) -> Result<(), Error> {
         self.next_edge = edge as usize;
 
         let offset = 256 * self.node_index + edge as usize;
 
         let has_label = self.labels.get(offset)?;
         if has_label != 1 {
-            return Err(SurfError::NoSuchEdge);
+            return Err(Error::NoSuchEdge);
         }
 
         let has_child = self.has_child.get(offset)?;
         if has_child != 1 {
-            return Err(SurfError::IsLeaf);
+            return Err(Error::IsLeaf);
         }
 
         let next_node = self.has_child.rank(1, offset)?;
@@ -104,7 +68,7 @@ impl Iterator {
         Ok(())
     }
 
-    pub fn next(&mut self) -> Result<Vec<u8>, SurfError> {
+    pub fn next_key(&mut self) -> Result<Vec<u8>, Error> {
         loop {
             for _ in self.next_edge..256 {
                 match self.go_to_child(self.next_edge as u8) {
@@ -133,7 +97,7 @@ impl Iterator {
             }
 
             if self.node_index == 0 {
-                return Err(SurfError::EndOfTrie);
+                return Err(Error::EndOfTrie);
             } else {
                 self.node_index = self.nodes.pop_back().unwrap();
                 self.next_edge = self.edges.pop_back().unwrap() + 1;

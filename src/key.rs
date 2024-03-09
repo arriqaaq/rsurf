@@ -20,10 +20,10 @@ impl KeyOps for Vec<u8> {
         let min_length = std::cmp::min(self.len(), other.len());
 
         for i in 0..min_length {
-            if self[i] < other[i] {
-                return true;
-            } else if self[i] > other[i] {
-                return false;
+            match self[i].cmp(&other[i]) {
+                std::cmp::Ordering::Less => return true,
+                std::cmp::Ordering::Greater => return false,
+                std::cmp::Ordering::Equal => continue,
             }
         }
 

@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use crate::bitmap::Bitmap;
 use crate::key::Key;
 
@@ -43,7 +41,7 @@ pub(crate) struct Builder {
     // further down the tree.
     // There is a 1:1 correspondence between tasks and (potential) future
     // nodes.
-    tasks: RefCell<Vec<NodeTask>>,
+    tasks: Vec<NodeTask>,
     // current_task is a pointer to the most recent element of the tasks
     // slice.
     // As such it is not the task currently being worked on, but the task
@@ -67,7 +65,7 @@ impl Builder {
             labels: Bitmap::new(256, 256 * memory_unit),
             has_child: Bitmap::new(256, 256 * memory_unit),
             is_prefix_key: Bitmap::new(1, memory_unit),
-            tasks: RefCell::new(Vec::new()),
+            tasks: Vec::new(),
             current_task_id: 0,
             current_node_id: 0,
         }
@@ -81,7 +79,7 @@ impl Builder {
         // For depth = 0 we'll consider all keys
         self.append_node_task();
         {
-            let mut tasks = self.tasks.borrow_mut();
+            let tasks = &mut self.tasks;
             let current_task = tasks.get_mut(self.current_task_id).unwrap();
             current_task.keys = keys.to_vec();
         }
@@ -90,10 +88,10 @@ impl Builder {
             // During iteration we'll be adding tasks of the next tree
             // level. But we only want to consider tasks of the current
             // level.
-            let n = self.tasks.borrow().len();
+            let n = self.tasks.len();
             for i in 0..n {
                 let task = {
-                    let tasks = self.tasks.borrow();
+                    let tasks = &mut self.tasks;
                     tasks[i].clone()
                 };
 
@@ -136,22 +134,22 @@ impl Builder {
                             is_prefix_key: false,
                         };
 
-                        self.tasks.borrow_mut().push(task);
-                        self.current_task_id = self.tasks.borrow().len() - 1;
+                        self.tasks.push(task);
+                        self.current_task_id = self.tasks.len() - 1;
 
                         most_recent_edge = edge;
                         node_has_edges = true;
                     }
 
                     if depth == key.len() - 1 {
-                        let mut tasks = self.tasks.borrow_mut();
+                        let tasks = &mut self.tasks;
                         let current_task = tasks.get_mut(self.current_task_id).unwrap();
                         current_task.is_prefix_key = true;
                     } else {
                         let bit = self.has_child_offset() + usize::from(edge);
                         self.has_child.set(bit)?;
 
-                        let mut tasks = self.tasks.borrow_mut();
+                        let tasks = &mut self.tasks;
                         let current_task = tasks.get_mut(self.current_task_id).unwrap();
                         current_task.keys.push(key.to_vec());
                     }
@@ -163,11 +161,10 @@ impl Builder {
 
             // We processed all tasks of the current level, so we'll
             // discard them.
-            self.tasks.borrow_mut().drain(..n);
+            self.tasks.drain(..n);
         }
         Ok(())
     }
-
 
     // label_offset returns the offset in the D-Labels bitmap of the currently processed node.
     fn label_offset(&self) -> usize {
@@ -192,8 +189,8 @@ impl Builder {
             is_prefix_key: false,
         };
 
-        self.tasks.borrow_mut().push(task);
-        self.current_task_id = self.tasks.borrow().len() - 1;
+        self.tasks.push(task);
+        self.current_task_id = self.tasks.len() - 1;
     }
 }
 
@@ -234,19 +231,19 @@ mod tests {
             vec![0x60], // 3
             vec![0xF9], // 4
         ];
-        let mut eLabels = Bitmap::new(256, 256);
-        let eHasChild = Bitmap::new(256, 256);
-        let eIsPrefixKey = Bitmap::new(1, 256);
+        let mut e_labels = Bitmap::new(256, 256);
+        let e_has_child = Bitmap::new(256, 256);
+        let e_is_prefix_key = Bitmap::new(1, 256);
 
         for k in &keys {
-            eLabels.set(k[0] as usize).unwrap();
+            e_labels.set(k[0] as usize).unwrap();
         }
 
         b.build(&keys).unwrap();
 
-        assert_eq!(eLabels.data, b.labels.data);
-        assert_eq!(eHasChild.data, b.has_child.data);
-        assert_eq!(eIsPrefixKey.data, b.is_prefix_key.data);
+        assert_eq!(e_labels.data, b.labels.data);
+        assert_eq!(e_has_child.data, b.has_child.data);
+        assert_eq!(e_is_prefix_key.data, b.is_prefix_key.data);
     }
 
     #[test]
