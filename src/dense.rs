@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
 use crate::bitmap::Bitmap;
-use crate::key::{Key};
+use crate::key::Key;
 
 // NodeTask contains things which need to be considered for building up a future node.
 //
@@ -73,12 +73,6 @@ impl Builder {
         }
     }
 
-    // NodeCapacity returns the number of nodes which can be encoded by this
-    // builder in total.
-    fn node_capacity(&self) -> usize {
-        self.is_prefix_key.capacity
-    }
-
     // Build instantiates a LOUDS-DENSE encoded tree using the given keys.
     //
     // Build may only be called on a freshly created instance. Calling Build on a
@@ -86,10 +80,11 @@ impl Builder {
     pub(crate) fn build(&mut self, keys: &[Key]) -> Result<(), &'static str> {
         // For depth = 0 we'll consider all keys
         self.append_node_task();
-        let mut tasks = self.tasks.borrow_mut();
-        let current_task = tasks.get_mut(self.current_task_id);
-        current_task.unwrap().keys = keys.to_vec();
-        drop(tasks);
+        {
+            let mut tasks = self.tasks.borrow_mut();
+            let current_task = tasks.get_mut(self.current_task_id).unwrap();
+            current_task.keys = keys.to_vec();
+        }
 
         for depth in 0..max_key_length(keys) {
             // During iteration we'll be adding tasks of the next tree
@@ -97,7 +92,10 @@ impl Builder {
             // level.
             let n = self.tasks.borrow().len();
             for i in 0..n {
-                let task = self.tasks.borrow_mut()[i].clone();
+                let task = {
+                    let tasks = self.tasks.borrow();
+                    tasks[i].clone()
+                };
 
                 if task.keys.is_empty() {
                     // Empty tasks are the result of there only being a
@@ -115,17 +113,14 @@ impl Builder {
                 // allocated.
                 // This is not strictly needed, but makes for cleaner / easier to test
                 // results.
-
                 self.labels.get(self.label_offset() + 255)?;
                 self.has_child.get(self.has_child_offset() + 255)?;
                 let bit = self.is_prefix_key_offset();
-
                 self.is_prefix_key.get(bit)?;
 
                 // If the node is non-empty (which is the case if we are here), and the task has
                 // its is_prefix_key flag set, then that means that one key ended on this node.
                 if task.is_prefix_key {
-                    // self.set_is_prefix_key()?;
                     self.is_prefix_key.set(bit)?;
                 }
 
@@ -133,13 +128,9 @@ impl Builder {
                     let edge = key[depth];
 
                     if !node_has_edges || most_recent_edge != edge {
-                        // self.add_edge(edge)?;
                         let bit = self.label_offset() + usize::from(edge);
                         self.labels.set(bit)?;
 
-                        // Having added a new edge means that there will also, on the next level,
-                        // be a new node which future keys (if we're not at their end yet) will go into.
-                        // self.append_node_task();
                         let task = NodeTask {
                             keys: Vec::new(),
                             is_prefix_key: false,
@@ -153,20 +144,16 @@ impl Builder {
                     }
 
                     if depth == key.len() - 1 {
-                        // Key ends at the node next to its edge, so if that node exists it will
-                        // have to have is_prefix_key set to true
                         let mut tasks = self.tasks.borrow_mut();
-                        let current_task = tasks.get_mut(self.current_task_id);
-                        current_task.unwrap().is_prefix_key = true;
+                        let current_task = tasks.get_mut(self.current_task_id).unwrap();
+                        current_task.is_prefix_key = true;
                     } else {
-                        // self.set_has_child(edge)?;
                         let bit = self.has_child_offset() + usize::from(edge);
                         self.has_child.set(bit)?;
 
                         let mut tasks = self.tasks.borrow_mut();
-                        let current_task = tasks.get_mut(self.current_task_id);
-
-                        current_task.unwrap().keys.push(key.to_vec());
+                        let current_task = tasks.get_mut(self.current_task_id).unwrap();
+                        current_task.keys.push(key.to_vec());
                     }
                 }
 
@@ -181,27 +168,6 @@ impl Builder {
         Ok(())
     }
 
-    // add_edge adds a new edge at the node being currently built up.
-    fn add_edge(&mut self, edge: u8) -> Result<(), &'static str> {
-        let bit = self.label_offset() + usize::from(edge);
-        self.labels.set(bit)?;
-        Ok(())
-    }
-
-    // set_has_child sets the has-child flag of the given edge at the node being
-    // currently built up.
-    fn set_has_child(&mut self, edge: u8) -> Result<(), &'static str> {
-        let bit = self.has_child_offset() + usize::from(edge);
-        self.has_child.set(bit)?;
-        Ok(())
-    }
-
-    // set_is_prefix_key sets the is-prefix-key flag of the node currently being built up.
-    fn set_is_prefix_key(&mut self) -> Result<(), &'static str> {
-        let bit = self.is_prefix_key_offset();
-        self.is_prefix_key.set(bit);
-        Ok(())
-    }
 
     // label_offset returns the offset in the D-Labels bitmap of the currently processed node.
     fn label_offset(&self) -> usize {
